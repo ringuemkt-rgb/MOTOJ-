@@ -1,0 +1,12 @@
+{
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ],
+  "name": "MotoJá Premium",
+  "description": "Premium mobility solution with AI-driven safety and real-time tracking.",
+  "short_name": "MotoJá",
+  "theme_color": "#0B0B0E",
+  "background_color": "#0B0B0E"
+}
