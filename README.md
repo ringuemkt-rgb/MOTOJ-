@@ -78,6 +78,27 @@ Publique o conteúdo de `dist/` em qualquer host estático:
 - Cloudflare Pages
 - GitHub Pages
 
+
+## Arquitetura inspirada em RIBs (Uber)
+
+Para organizar o fluxo de corrida com separação de responsabilidades, foi adicionada uma estrutura inspirada no padrão aberto **RIBs**:
+
+```txt
+ribs/
+  ride/
+    builder.ts
+    interactor.ts
+    router.ts
+    types.ts
+```
+
+- `builder.ts`: monta o módulo de corrida.
+- `interactor.ts`: regras de negócio (estimativa de preço/ETA e seleção de motorista).
+- `router.ts`: mapeamento de status para labels e tom visual.
+- `types.ts`: contratos tipados do domínio.
+
+> Referência: https://github.com/uber/RIBs (conceito arquitetural).
+
 ## 6) Funcionalidades prontas x pendentes
 
 Pronto no código atual:
