@@ -9,6 +9,9 @@ import {
   Camera, Mic, Video, Image as ImageIcon, Wand2, BrainCircuit, Globe,
   Plus, CreditCard as CardIcon, Banknote, Landmark, Check
 } from 'lucide-react';
+import { buildRideModule } from './ribs/ride/builder';
+import { rideStatusLabel, rideStatusTone } from './ribs/ride/router';
+import { DriverInfo, RideQuote, RideStatus } from './ribs/ride/types';
 
 // Leaflet types hack
 declare var L: any;
@@ -46,6 +49,18 @@ interface PaymentMethod {
 const encode = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
 const decode = (base64: string) => new Uint8Array(atob(base64).split('').map(c => c.charCodeAt(0)));
 
+
+const resolveGeminiApiKey = () => {
+  const viteEnv = (import.meta as any)?.env ?? {};
+  return viteEnv.VITE_GEMINI_API_KEY || viteEnv.GEMINI_API_KEY || (globalThis as any)?.process?.env?.API_KEY || '';
+};
+
+const GEMINI_API_KEY = resolveGeminiApiKey();
+const rideModule = buildRideModule();
+
+const formatCurrency = (amount: number) =>
+  amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
 async function decodeAudioData(data: Uint8Array, ctx: AudioContext): Promise<AudioBuffer> {
   const dataInt16 = new Int16Array(data.buffer);
   const buffer = ctx.createBuffer(1, dataInt16.length, 24000);
@@ -66,6 +81,11 @@ const App: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [messages, setMessages] = useState<any[]>([]);
   const [inputText, setInputText] = useState('');
+  const [destination, setDestination] = useState('Centro de Ituberá');
+  const [rideStatus, setRideStatus] = useState<RideStatus>('idle');
+  const [rideQuote, setRideQuote] = useState<RideQuote | null>(null);
+  const [assignedDriver, setAssignedDriver] = useState<DriverInfo | null>(null);
+  const [rideCode, setRideCode] = useState<string | null>(null);
 
   // Payment State
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([
@@ -81,6 +101,16 @@ const App: React.FC = () => {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const sessionRef = useRef<any>(null);
   const nextStartTimeRef = useRef(0);
+  const rideTimersRef = useRef<number[]>([]);
+
+  const clearRideTimers = useCallback(() => {
+    rideTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    rideTimersRef.current = [];
+  }, []);
+
+  useEffect(() => {
+    return () => clearRideTimers();
+  }, [clearRideTimers]);
 
   // --- REAL-TIME GPS TRACKING ---
   useEffect(() => {
@@ -128,6 +158,10 @@ const App: React.FC = () => {
   // --- AI LOGIC ---
   const handleAsk = async () => {
     if (!inputText.trim()) return;
+    if (!GEMINI_API_KEY) {
+      setMessages(prev => [...prev, { role: 'model', text: 'Defina VITE_GEMINI_API_KEY no .env.local para ativar a Central IA.' }]);
+      return;
+    }
     const userMsg = { role: 'user', text: inputText };
     setMessages(prev => [...prev, userMsg]);
     const prompt = inputText;
@@ -135,7 +169,7 @@ const App: React.FC = () => {
     setIsGenerating(true);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
       const model = thinking ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
       
       const config: any = {
@@ -173,7 +207,12 @@ const App: React.FC = () => {
       return;
     }
 
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    if (!GEMINI_API_KEY) {
+      setMessages(prev => [...prev, { role: 'model', text: 'Defina VITE_GEMINI_API_KEY no .env.local para ativar a Central IA.' }]);
+      return;
+    }
+
+    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     audioCtxRef.current = new AudioContext({ sampleRate: 24000 });
     const outputNode = audioCtxRef.current.createGain();
     outputNode.connect(audioCtxRef.current.destination);
@@ -230,6 +269,55 @@ const App: React.FC = () => {
     setSelectedPaymentId(newId);
   };
 
+  const requestRide = () => {
+    if (!coords || !destination.trim()) return;
+
+    clearRideTimers();
+    const destinationPoint = {
+      lat: coords.lat + 0.018,
+      lng: coords.lng + 0.012,
+    };
+
+    const quote = rideModule.estimateRideQuote(coords, destinationPoint);
+    const driver = rideModule.selectNearestDriver();
+    setRideQuote(quote);
+    setAssignedDriver(null);
+    setRideCode(`MJ-${Math.floor(1000 + Math.random() * 8999)}`);
+    setRideStatus('searching');
+
+    const assignTimer = window.setTimeout(() => {
+      setAssignedDriver(driver);
+      setRideStatus('driver_assigned');
+    }, 1800);
+
+    const arrivingTimer = window.setTimeout(() => {
+      setRideStatus('driver_arriving');
+    }, 4500);
+
+    const inProgressTimer = window.setTimeout(() => {
+      setRideStatus('in_progress');
+    }, 8500);
+
+    const completeTimer = window.setTimeout(() => {
+      setRideStatus('completed');
+    }, 14500);
+
+    rideTimersRef.current = [assignTimer, arrivingTimer, inProgressTimer, completeTimer];
+  };
+
+  const cancelRide = () => {
+    clearRideTimers();
+    setRideStatus('cancelled');
+  };
+
+  const resetRideFlow = () => {
+    clearRideTimers();
+    setRideStatus('idle');
+    setRideQuote(null);
+    setAssignedDriver(null);
+    setRideCode(null);
+  };
+
   return (
     <div className="h-screen w-full relative overflow-hidden">
       
@@ -281,13 +369,48 @@ const App: React.FC = () => {
              </div>
              
              <div className="glass p-6 rounded-[24px]">
-                <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center justify-between mb-4">
                    <div>
                       <h3 className="text-xl font-black italic">Bora lá?</h3>
                       <p className="text-[10px] font-bold opacity-50 uppercase tracking-widest">A confirmação é imediata</p>
                    </div>
                    <Navigation size={24} className="text-gold animate-pulse" />
                 </div>
+
+                <div className="grid grid-cols-1 gap-2 mb-4">
+                  <div className="h-12 bg-white/5 border border-stroke rounded-xl px-4 flex items-center gap-3">
+                    <MapPin size={16} className="text-gold" />
+                    <span className="text-xs font-semibold truncate">
+                      {coords ? `Origem: ${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}` : 'Origem: aguardando GPS'}
+                    </span>
+                  </div>
+                  <div className="h-12 bg-white/5 border border-stroke rounded-xl px-4 flex items-center gap-3">
+                    <Navigation size={16} className="text-gold" />
+                    <input
+                      value={destination}
+                      onChange={(event) => setDestination(event.target.value)}
+                      placeholder="Digite seu destino"
+                      className="flex-1 bg-transparent border-none outline-none text-xs font-semibold"
+                    />
+                  </div>
+                </div>
+
+                {rideQuote && (
+                  <div className="grid grid-cols-3 gap-2 mb-4 text-center">
+                    <div className="bg-white/5 border border-stroke rounded-xl p-2">
+                      <p className="text-[9px] uppercase opacity-50">Distância</p>
+                      <p className="text-xs font-black">{rideQuote.distanceKm} km</p>
+                    </div>
+                    <div className="bg-white/5 border border-stroke rounded-xl p-2">
+                      <p className="text-[9px] uppercase opacity-50">ETA</p>
+                      <p className="text-xs font-black">{rideQuote.etaMinutes} min</p>
+                    </div>
+                    <div className="bg-white/5 border border-stroke rounded-xl p-2">
+                      <p className="text-[9px] uppercase opacity-50">Preço</p>
+                      <p className="text-xs font-black text-gold">{formatCurrency(rideQuote.amount)}</p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Selected Payment Preview */}
                 <button 
@@ -301,9 +424,43 @@ const App: React.FC = () => {
                   <ChevronRight size={16} className="opacity-40" />
                 </button>
 
-                <button className="w-full h-16 bg-gold text-black font-black uppercase rounded-2xl flex items-center justify-center gap-3 active:scale-95 transition-all">
-                   Confirmar Chamada <Zap size={20} fill="currentColor" />
-                </button>
+                <div className="mb-4 p-3 rounded-xl bg-white/5 border border-stroke">
+                  <p className={`text-[11px] font-black uppercase tracking-wider ${rideStatusTone[rideStatus]}`}>
+                    {rideStatusLabel[rideStatus]}
+                  </p>
+                  {rideCode && <p className="text-[10px] opacity-70 mt-1">Código: {rideCode}</p>}
+                  {assignedDriver && (
+                    <p className="text-[10px] opacity-80 mt-1">
+                      {assignedDriver.name} • {assignedDriver.vehicle} • ⭐ {assignedDriver.rating.toFixed(1)} • {assignedDriver.etaMinutes} min
+                    </p>
+                  )}
+                </div>
+
+                {rideStatus === 'idle' || rideStatus === 'cancelled' || rideStatus === 'completed' ? (
+                  <button
+                    onClick={requestRide}
+                    disabled={!coords || !destination.trim()}
+                    className="w-full h-16 bg-gold disabled:opacity-50 disabled:cursor-not-allowed text-black font-black uppercase rounded-2xl flex items-center justify-center gap-3 active:scale-95 transition-all"
+                  >
+                    Solicitar Corrida <Zap size={20} fill="currentColor" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={cancelRide}
+                    className="w-full h-16 bg-danger text-white font-black uppercase rounded-2xl flex items-center justify-center gap-3 active:scale-95 transition-all"
+                  >
+                    Cancelar Corrida <X size={18} />
+                  </button>
+                )}
+
+                {(rideStatus === 'completed' || rideStatus === 'cancelled') && (
+                  <button
+                    onClick={resetRideFlow}
+                    className="w-full h-11 mt-3 bg-white/10 border border-stroke text-white text-xs font-black uppercase rounded-xl"
+                  >
+                    Nova solicitação
+                  </button>
+                )}
              </div>
           </div>
 
@@ -498,6 +655,18 @@ const QuickService = ({ icon, label, active = false }: any) => (
      <span className="text-[10px] font-black uppercase tracking-tighter">{label}</span>
   </div>
 );
+
+const registerServiceWorker = () => {
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./service-worker.js').catch((error) => {
+        console.warn('Falha ao registrar service worker:', error);
+      });
+    });
+  }
+};
+
+registerServiceWorker();
 
 const root = createRoot(document.getElementById('root')!);
 root.render(<App />);
