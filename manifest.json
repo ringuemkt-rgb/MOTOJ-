@@ -1,14 +1,16 @@
 {
-  "name": "MotoJá - Mobilidade Premium",
+  "name": "MotoJá Premium",
   "short_name": "MotoJá",
-  "start_url": "./index.html",
+  "description": "Plataforma mobile de mobilidade com rastreamento em tempo real e central IA.",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#111111",
-  "theme_color": "#111111",
+  "background_color": "#0B0B0E",
+  "theme_color": "#0B0B0E",
   "orientation": "portrait-primary",
   "icons": [
     {
-      "src": "./icon.svg",
+      "src": "/icon.svg",
       "sizes": "512x512",
       "type": "image/svg+xml",
       "purpose": "any maskable"

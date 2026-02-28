@@ -46,6 +46,13 @@ interface PaymentMethod {
 const encode = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
 const decode = (base64: string) => new Uint8Array(atob(base64).split('').map(c => c.charCodeAt(0)));
 
+
+const resolveGeminiApiKey = () => {
+  const viteEnv = (import.meta as any)?.env ?? {};
+  return viteEnv.VITE_GEMINI_API_KEY || viteEnv.GEMINI_API_KEY || (globalThis as any)?.process?.env?.API_KEY || '';
+};
+
+const GEMINI_API_KEY = resolveGeminiApiKey();
 async function decodeAudioData(data: Uint8Array, ctx: AudioContext): Promise<AudioBuffer> {
   const dataInt16 = new Int16Array(data.buffer);
   const buffer = ctx.createBuffer(1, dataInt16.length, 24000);
@@ -128,6 +135,10 @@ const App: React.FC = () => {
   // --- AI LOGIC ---
   const handleAsk = async () => {
     if (!inputText.trim()) return;
+    if (!GEMINI_API_KEY) {
+      setMessages(prev => [...prev, { role: 'model', text: 'Defina VITE_GEMINI_API_KEY no .env.local para ativar a Central IA.' }]);
+      return;
+    }
     const userMsg = { role: 'user', text: inputText };
     setMessages(prev => [...prev, userMsg]);
     const prompt = inputText;
@@ -135,7 +146,7 @@ const App: React.FC = () => {
     setIsGenerating(true);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
       const model = thinking ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
       
       const config: any = {
@@ -173,7 +184,12 @@ const App: React.FC = () => {
       return;
     }
 
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    if (!GEMINI_API_KEY) {
+      setMessages(prev => [...prev, { role: 'model', text: 'Defina VITE_GEMINI_API_KEY no .env.local para ativar a Central IA.' }]);
+      return;
+    }
+
+    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     audioCtxRef.current = new AudioContext({ sampleRate: 24000 });
     const outputNode = audioCtxRef.current.createGain();
     outputNode.connect(audioCtxRef.current.destination);
@@ -498,6 +514,18 @@ const QuickService = ({ icon, label, active = false }: any) => (
      <span className="text-[10px] font-black uppercase tracking-tighter">{label}</span>
   </div>
 );
+
+const registerServiceWorker = () => {
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./service-worker.js').catch((error) => {
+        console.warn('Falha ao registrar service worker:', error);
+      });
+    });
+  }
+};
+
+registerServiceWorker();
 
 const root = createRoot(document.getElementById('root')!);
 root.render(<App />);
